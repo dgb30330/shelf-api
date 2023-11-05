@@ -7,3 +7,6 @@ on new machine
 -to set up venv from home dir: py -3 -m venv .venv
 -activate as above
 -to install from venv: pip install Flask
+
+db library: https://pypi.org/project/Flask-MySQLdb/
+install: pip install Flask-MySQLdb
