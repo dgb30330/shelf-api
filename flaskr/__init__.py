@@ -2,7 +2,12 @@ import os
 
 from flask import Flask
 
+from flask import request
+
 from flask_mysqldb import MySQL
+
+import flaskr.helpers
+import flaskr.models
 
 
 def create_app(test_config=None):
@@ -38,7 +43,7 @@ def create_app(test_config=None):
     @app.route('/hello')
     def hello():
         cur = mysql.connection.cursor()
-        cur.execute("select * from shelf.users;")
+        cur.execute("select * from shelf.user;")
         rv = cur.fetchall()
         return str(rv)
     
@@ -56,7 +61,16 @@ def create_app(test_config=None):
     @app.route('/user/<user_id>', methods = ['GET','POST','PUT'])
     #user info includes id display name and privacy pref
     def user(user_id):
-        pass
+        if request.method == 'POST':
+            return "user post"
+        elif request.method == 'PUT':
+            return "user PUT"
+        else:
+            cur = mysql.connection.cursor()
+            cur.execute("select * from shelf.user where id = "+user_id+";")
+            rv = cur.fetchall()
+            return str(rv)
+        
 
     #Homepage (what is here! shelves/artists/blogs by size and position)
     #using - shelves endpoint with options ('/shelves/<options>/<user_id>')
@@ -69,11 +83,36 @@ def create_app(test_config=None):
     #needed options definitions - 'all' 'home'  
     def shelves(options,user_id):
         pass
-
+ 
     @app.route('/shelf/<shelf_id>', methods = ['GET','POST','PUT'])
     #to handle individual shelves in detail  
     def shelf(shelf_id):
-        pass
+        if request.method == 'POST':
+            newShelf = flaskr.models.Shelf(True)
+            newShelf.populateFromRequest(request.data)
+            #return newShelf.createInsertQuery()
+            try:
+                cur = mysql.connection.cursor()
+                cur.execute(newShelf.createInsertQuery())
+                mysql.connection.commit()
+                return str(True)
+                #rv = cur.fetchall()
+            except Exception as e:
+                return str(e)
+        elif request.method == 'PUT':
+            dataDict = flaskr.helpers.dictFromRaw(request.data)
+            return 'edit shelf id ' + shelf_id + ' new name: ' + dataDict["name"]
+        else:
+            shelfToGet = flaskr.models.Shelf(False)
+            shelfToGet.id = shelf_id
+            try:
+                cur = mysql.connection.cursor()
+                cur.execute(shelfToGet.createGetAllByIdQuery())
+                rv = cur.fetchall()
+                return shelfToGet.prepDatabaseReturn(rv)
+            except Exception as e:
+                return str(e)
+        
 
     @app.route('/shelf_lite/<shelf_id>')
     #minimal return for preview  
@@ -114,6 +153,16 @@ def create_app(test_config=None):
     @app.route('/record_lite/<record_id>')
     #minimal return for preview  
     def record_lite(record_id):
+        pass
+
+    @app.route('/links/<record_id>', methods = ['GET','POST','PUT'])
+    #to handle streamin links by record  
+    def links(record_id):
+        pass
+
+    @app.route('/resources/<record_id>', methods = ['GET','POST','PUT'])
+    #to handle resource links by record  
+    def resources(record_id):
         pass
 
     @app.route('/artist/<artist_id>', methods = ['GET','POST','PUT'])
