@@ -26,6 +26,11 @@ class Model:
         newDict = json.loads(data)
         return newDict
     
+    def populateFromRequest(self,rawBody: bytes):
+        self.requestBodyData = self.dictFromRaw(rawBody)
+        for key in self.requestBodyData:
+            self.deliverableData[key] = self.requestBodyData[key]
+    
     def prepDatabaseReturn(self,databaseData: tuple):
         if len(databaseData) == 1:
             databaseData = databaseData[0]
@@ -44,9 +49,9 @@ class Model:
         for field in self.requiredFieldsTuples:
             query += "`"+field[0]+"`, "
             if field[1]:
-                values += self.requestBodyData[field[0]]+", "
+                values += self.deliverableData[field[0]]+", "
             else:
-                values += "'"+self.requestBodyData[field[0]]+"', "
+                values += "'"+self.deliverableData[field[0]]+"', "
         query = query[0:-2] + ") VALUES (" + values[0:-2] + ");"
         return query
         
@@ -100,11 +105,4 @@ class Shelf(Model):
         if(self.isNew):
             self.id = None
 
-    #this too can be abstracted - similar to prep database return function but with keys
-    def populateFromRequest(self,rawBody: bytes):
-        self.requestBodyData = super().dictFromRaw(rawBody)
-        self.name = self.requestBodyData[self.nameKey]
-        self.privacy_id = self.requestBodyData[self.privacy_idKey]
-        self.creator_id = self.requestBodyData[self.creator_idKey]
-        self.description = self.requestBodyData[self.descriptionKey]
 
