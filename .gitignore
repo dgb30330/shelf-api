@@ -1,4 +1,5 @@
 .venv/
+sandbox.py
 
 *.pyc
 __pycache__/

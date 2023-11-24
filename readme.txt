@@ -10,3 +10,6 @@ on new machine
 
 db library: https://pypi.org/project/Flask-MySQLdb/
 install: pip install Flask-MySQLdb
+
+jwt library: https://pyjwt.readthedocs.io/en/stable/
+install: pip install pyjwt
