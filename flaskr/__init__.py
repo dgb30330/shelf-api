@@ -110,8 +110,10 @@ def create_app(test_config=None):
             thisUser = flaskr.models.User()
             thisUser.setId(user_id)
             cur = mysql.connection.cursor()
-            cur.execute(thisUser.createGetAllByIdQuery())
+            #return thisUser.createSelectByIdQuery(minimal=True)
+            cur.execute(thisUser.createSelectByIdQuery())
             rv = cur.fetchall()
+            #return str(rv)
             thisUser.prepDatabaseReturn(rv)
             return thisUser.getPublicReturn()
         
@@ -132,6 +134,7 @@ def create_app(test_config=None):
     #to get all shelves of a user and modify 'owned' table determining shelf association
     #needed options definitions - 'all' 'home'  
     def shelves(options,user_id):
+        #expected body {'shelf_id':'x','user_id':'x','added':'YYYY-MM-DD HH:MM:SS.XX'}
         if request.method == 'POST':
             newOwnedShelf = flaskr.models.Owned()
             newOwnedShelf.populateFromRequest(request.data)
@@ -182,8 +185,8 @@ def create_app(test_config=None):
             shelfToGet.setId(shelf_id)
             try:
                 cur = mysql.connection.cursor()
-                #return shelfToGet.createGetAllByIdQuery()
-                cur.execute(shelfToGet.createGetAllByIdQuery())
+                #return shelfToGet.createSelectByIdQuery()
+                cur.execute(shelfToGet.createSelectByIdQuery())
                 rv = cur.fetchall()
                 return shelfToGet.prepDatabaseReturn(rv)
                 #TODO determine if this is where light record item is incorporated
@@ -194,13 +197,43 @@ def create_app(test_config=None):
     @app.route('/shelf_lite/<shelf_id>')
     #minimal return for preview  
     def shelf_lite(shelf_id):
-        pass
-        #likely need name ims description
+        shelfToGet = flaskr.models.Shelf()
+        shelfToGet.setId(shelf_id)
+        try:
+            cur = mysql.connection.cursor()
+            cur.execute(shelfToGet.createSelectByIdQuery(minimal=True))
+            rv = cur.fetchall()
+            return shelfToGet.prepDatabaseReturn(rv,minimal=True)
+        except Exception as e:
+            return str(e)
 
     @app.route('/record/<record_id>', methods = ['GET','POST','PUT'])
     #to handle individual records in detail  
     def record(record_id):
-        pass
+        #expected body {'title':'xxx','artist_id':'x','alias_id':'x'}
+        if request.method == 'POST':
+            #if artist/alias is new, must be called before this operation
+            newRecord = flaskr.models.Record()
+            newRecord.populateFromRequest(request.data)
+            try:
+                cur = mysql.connection.cursor()
+                cur.execute(newRecord.createInsertQuery())
+                mysql.connection.commit()
+                return str(True)
+            except Exception as e:
+                    return str(e)
+
+        elif request.method == 'PUT':
+            pass
+        else:
+            thisRecord = flaskr.models.Record()
+            thisRecord.setId(record_id)
+            cur = mysql.connection.cursor()
+            cur.execute(thisRecord.createJoinQuery(flaskr.models.Alias(),otherMinimum=True))
+            rv = cur.fetchall()
+            #TODO if parent_record_id is not null - retrieve and return parent - correct?
+            return thisRecord.prepJoinedDatabaseReturn(rv)
+
 
     @app.route('/record_lite/<record_id>')
     #minimal return for preview  
@@ -220,43 +253,164 @@ def create_app(test_config=None):
     @app.route('/artist/<artist_id>', methods = ['GET','POST','PUT'])
     #to handle individual artists in detail  
     def artist(artist_id):
-        pass
+        if request.method == 'POST':
+            #how do handle ALIAS on create?
+            newArtist = flaskr.models.Artist()
+            newArtist.populateFromRequest(request.data)
+            try:
+                cur = mysql.connection.cursor()
+                cur.execute(newArtist.createInsertQuery())
+                mysql.connection.commit()
+                return str(True)
+            except Exception as e:
+                    return str(e)
+
+        elif request.method == 'PUT':
+            pass
+        else:
+            thisArtist = flaskr.models.Artist()
+            thisArtist.setId(artist_id)
+            cur = mysql.connection.cursor()
+            cur.execute(thisArtist.createJoinQuery(flaskr.models.Alias(),otherMinimum=True))
+            rv = cur.fetchall()
+            return thisArtist.prepJoinedDatabaseReturn(rv)
 
     @app.route('/artist_lite/<artist_id>')
     #minimal return for preview  
     def artist_lite(artist_id):
         pass
 
+    @app.route('/alias/<alias_id>', methods = ['GET','POST','PUT'])
+    #to get all blogs of a user and modify 'follow' table determining shelf association
+    #needed options definitions - 'all' 'home'  
+    def alias(alias_id):
+        if request.method == 'POST':
+            newAlias = flaskr.models.Alias()
+            newAlias.populateFromRequest(request.data)
+            newVote = flaskr.models.Vote()
+            newAlias.setVoteId(newVote.generateId())
+            try:
+                cur = mysql.connection.cursor()
+                #return newVote.createInsertQuery()
+                cur.execute(newVote.createInsertQuery())
+                cur.execute(newAlias.createInsertQuery())
+                mysql.connection.commit()
+                return str(True)
+            except Exception as e:
+                    return str(e)
+
+        elif request.method == 'PUT':
+            pass
+        else:
+            aliasToGet = flaskr.models.Alias()
+            aliasToGet.setId(alias_id)
+            try:
+                cur = mysql.connection.cursor()
+                cur.execute(aliasToGet.createSelectByIdQuery())
+                rv = cur.fetchall()
+                return aliasToGet.prepDatabaseReturn(rv)
+            except Exception as e:
+                return str(e)
 
     @app.route('/blogs/<options>/<user_id>', methods = ['GET','POST','PUT'])
     #to get all blogs of a user and modify 'follow' table determining shelf association
     #needed options definitions - 'all' 'home'  
     def blogs(options,user_id):
-        pass
+        #expected body {'blog_id':'x','user_id':'x'}
+        if request.method == 'POST':
+            newBlogFollow = flaskr.models.Follow()
+            newBlogFollow.populateFromRequest(request.data)
+            try:
+                cur = mysql.connection.cursor()
+                cur.execute(newBlogFollow.createInsertQuery())
+                mysql.connection.commit()
+                return str(True)
+            except Exception as e:
+                return str(e)
+        elif request.method == 'PUT':
+            pass
+        else:
+            #options could dictate minimal or maximal response
+            manyFollows = flaskr.models.Follow()
+            cur = mysql.connection.cursor()
+            #return manyFollows.createJoinQuery(flaskr.models.Blog(),('user_id',True,user_id))
+            cur.execute(manyFollows.createJoinQuery(flaskr.models.Blog(),('user_id',True,user_id)))
+            rv = cur.fetchall()
+            #return str(rv)
+            return manyFollows.manyJoinedDatabaseReturns(rv)
 
-    @app.route('/blog/<blog_id>/<post_count>', methods = ['GET','POST','PUT'])
+    @app.route('/blog/<options>/<blog_id>', methods = ['GET','POST','PUT'])
     #to handle individual blogs in detail  
-    def blog(blog_id,post_count):
-        pass
+    def blog(options,blog_id):
+        #expected body {'name':'xxx'}
+        if request.method == 'POST':
+            #if artist/alias is new, must be called before this operation
+            newBlog = flaskr.models.Blog()
+            newBlog.populateFromRequest(request.data)
+            try:
+                cur = mysql.connection.cursor()
+                cur.execute(newBlog.createInsertQuery())
+                mysql.connection.commit()
+                return str(True)
+            except Exception as e:
+                    return str(e)
+
+        elif request.method == 'PUT':
+            pass
+        else:
+            thisBlog = flaskr.models.Blog()
+            thisBlog.setId(blog_id)
+            cur = mysql.connection.cursor()
+            cur.execute(thisBlog.createSelectByIdQuery())
+            rv = cur.fetchall()
+            return thisBlog.prepDatabaseReturn(rv)
 
     @app.route('/blog_lite/<blog_id>')
     #minimal return for preview  
     def blog_lite(blog_id):
-        pass
+        thisBlog = flaskr.models.Blog()
+        thisBlog.setId(blog_id)
+        cur = mysql.connection.cursor()
+        cur.execute(thisBlog.createSelectByIdQuery())
+        rv = cur.fetchall()
+        return thisBlog.prepDatabaseReturn(rv,minimal=True)
 
-    @app.route('/posts/<options>/<blog_id>/<post_count>')
+    @app.route('/posts/<options>/<blog_id>')
     #minimal return for preview  
-    def posts(options,blog_id,post_count):
-        pass
+    def posts(options,blog_id):
+        manyPosts = flaskr.models.Post()
+        cur = mysql.connection.cursor()
+        cur.execute(manyPosts.createJoinQuery(flaskr.models.User(),('blog_id',True,blog_id),otherMinimum=True))
+        rv = cur.fetchall()
+        return manyPosts.manyJoinedDatabaseReturns(rv)
 
-    @app.route('/post', methods = ['GET','POST','PUT'])
+    @app.route('/post/<post_id>', methods = ['GET','POST','PUT'])
     #to handle individual blogs in detail  
-    def post():
-        pass
+    def post(post_id):
+        #expected body {'user_id':'x','blog_id':'x','text':'xxx','posted':'YYYY-MM-DD HH:MM:SS.XX','vote_id':'xxx'}
+        if request.method == 'POST':
+            newPost = flaskr.models.Post()
+            newPost.populateFromRequest(request.data)
+            newVote = flaskr.models.Vote()
+            newPost.setVoteId(newVote.generateId())
+            try:
+                cur = mysql.connection.cursor()
+                cur.execute(newVote.createInsertQuery())
+                cur.execute(newPost.createInsertQuery())
+                mysql.connection.commit()
+                return str(True)
+            except Exception as e:
+                return str(e)
 
-    
-
-
+        elif request.method == 'PUT':
+            pass
+        else:
+            thisPost = flaskr.models.Post()
+            thisPost.setId(post_id)
+            cur = mysql.connection.cursor()
+            cur.execute(thisPost.createJoinQuery(flaskr.models.User(),otherMinimum=True))
+            rv = cur.fetchall()
+            return thisPost.prepJoinedDatabaseReturn(rv)
 
     
 

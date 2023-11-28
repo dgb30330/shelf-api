@@ -1,7 +1,10 @@
 import json
 import jwt
+import uuid
+
 
 secret = "whatever"
+
 
 class ModelData:
     table = 'shelf.required'
@@ -28,7 +31,69 @@ class Model(ModelData):
 
 
     def setId(self,incomingId):
-        self.deliverableData[self.idKey] = incomingId
+        self.deliverableData[self.idKey] = incomingId      
+
+    def dictFromRaw(self, responseData: bytes):
+        data = responseData.decode('UTF-8')
+        data = data.replace("'",'"')
+        newDict = json.loads(data)
+        return newDict
+    
+    def populateFromRequest(self,rawBody: bytes):
+        self.requestBodyData = self.dictFromRaw(rawBody)
+        for key in self.requestBodyData:
+            self.deliverableData[key] = self.requestBodyData[key]
+    
+    def prepDatabaseReturn(self,databaseData: tuple, minimal=False):
+        if minimal:
+            keysList = self.minimalDatabaseKeys
+        else:
+            keysList = self.allDatabaseKeys
+
+        if len(databaseData) == 1:
+            databaseData = databaseData[0]
+
+        for i in range(len(keysList)):
+            self.deliverableData[keysList[i]] = databaseData[i]
+        returnableData = self.deliverableData.copy()
+        return returnableData
+    
+    def manyDatabaseReturns(self,databaseData:tuple):
+        allDecoded = []
+        for innerTuple in databaseData:
+            allDecoded.append(self.prepDatabaseReturn(innerTuple))
+        return allDecoded
+
+    def prepJoinedDatabaseReturn(self,databaseData: tuple):
+        if len(databaseData) == 1:
+            databaseData = databaseData[0]
+        subKey = None
+        for i in range(len(self.allJoinedKeys)):
+            if "." in self.allJoinedKeys[i]:
+                tableFieldTup = self.allJoinedKeys[i].split(".")
+                if subKey == None:
+                    subKey = tableFieldTup[0]
+                    self.deliverableData[subKey] = {}
+                self.deliverableData[tableFieldTup[0]][tableFieldTup[1]] = databaseData[i]
+            else:
+                self.deliverableData[self.allJoinedKeys[i]] = databaseData[i]
+        returnableData = self.deliverableData.copy()
+        return returnableData
+    
+    def manyJoinedDatabaseReturns(self,databaseData:tuple):
+        allDecoded = []
+        for innerTuple in databaseData:
+            allDecoded.append(self.prepJoinedDatabaseReturn(innerTuple))
+        return allDecoded
+
+    def decodeWhereConditionFieldNumericboolValueTuple(self,whereConditionFieldNumericboolValueTuple):
+        whereCondition = self.tableName + "." + whereConditionFieldNumericboolValueTuple[0] + " = "
+        if whereConditionFieldNumericboolValueTuple[1]:
+            whereCondition += whereConditionFieldNumericboolValueTuple[2]
+        else:
+            whereCondition += "'"+whereConditionFieldNumericboolValueTuple[2]+"'"
+        return whereCondition
+
 
     def createJoinQuery(self,otherTableObject: ModelData, whereConditionFieldNumericboolValueTuple=None, foreignKey = None, thisMinimum = False, otherMinimum = False) -> str:
         #set conditions
@@ -38,11 +103,7 @@ class Model(ModelData):
 
         self.joinObject = otherTableObject #WATCH might be unneccessary 
         if whereConditionFieldNumericboolValueTuple != None:
-            whereCondition = self.tableName + "." + whereConditionFieldNumericboolValueTuple[0] + " = "
-            if whereConditionFieldNumericboolValueTuple[1]:
-                whereCondition += whereConditionFieldNumericboolValueTuple[2]
-            else:
-                whereCondition += "'"+whereConditionFieldNumericboolValueTuple[2]+"'"
+            whereCondition = self.decodeWhereConditionFieldNumericboolValueTuple(whereConditionFieldNumericboolValueTuple)
         else:
             whereCondition = self.tableName + "." + self.idKey + " = " + self.deliverableData[self.idKey]
         
@@ -68,63 +129,20 @@ class Model(ModelData):
             query +=  tableField + ", "
         
         query = query[0:-2] + " from " + self.table + " INNER JOIN "+ otherTableObject.table +" where " + whereCondition + " AND "+ relationCondition +";"
-        return query       
-
-    def dictFromRaw(self, responseData: bytes):
-        data = responseData.decode('UTF-8')
-        data = data.replace("'",'"')
-        newDict = json.loads(data)
-        return newDict
+        return query 
     
-    def populateFromRequest(self,rawBody: bytes):
-        self.requestBodyData = self.dictFromRaw(rawBody)
-        for key in self.requestBodyData:
-            self.deliverableData[key] = self.requestBodyData[key]
-    
-    def prepDatabaseReturn(self,databaseData: tuple):
-        if len(databaseData) == 1:
-            databaseData = databaseData[0]
-        for i in range(len(self.allDatabaseKeys)):
-            self.deliverableData[self.allDatabaseKeys[i]] = databaseData[i]
-        return self.deliverableData
-    
-    def manyDatabaseReturns(self,databaseData:tuple):
-        allDecoded = []
-        for innerTuple in databaseData:
-            allDecoded.append(self.prepDatabaseReturn(innerTuple))
-        return allDecoded
-
-    def prepJoinedDatabaseReturn(self,databaseData: tuple):
-        if len(databaseData) == 1:
-            databaseData = databaseData[0]
-        subKey = None
-        for i in range(len(self.allJoinedKeys)):
-            if "." in self.allJoinedKeys[i]:
-                tableFieldTup = self.allJoinedKeys[i].split(".")
-                if subKey == None:
-                    subKey = tableFieldTup[0]
-                    self.deliverableData[subKey] = {}
-                self.deliverableData[tableFieldTup[0]][tableFieldTup[1]] = databaseData[i]
-            else:
-                self.deliverableData[self.allJoinedKeys[i]] = databaseData[i]
-        return self.deliverableData
-    
-    def manyJoinedDatabaseReturns(self,databaseData:tuple):
-        allDecoded = []
-        for innerTuple in databaseData:
-            allDecoded.append(self.prepJoinedDatabaseReturn(innerTuple))
-        return allDecoded
-
-    
-    def createGetMinimalByIdQuery(self) -> str:
+    def createSelectByIdQuery(self,minimal=False,whereConditionFieldNumericboolValueTuple=None) -> str:
         query: str = "select "
-        for field in self.minimalDatabaseKeys:
-            query += field + ", "
-        query = query[0:-2] + " where id = " + str(self.deliverableData[self.idKey]) + ";"
-        return query
-    
-    def createGetAllByIdQuery(self) -> str:
-        query: str = "select * from " + self.table + " where id = " + str(self.deliverableData[self.idKey]) + ";"
+        if not minimal:
+            query += "* "
+        else:
+            for field in self.minimalDatabaseKeys:
+                query += field + ", "
+            query = query[0:-2]
+        query += " from " + self.table + " where id = " + str(self.deliverableData[self.idKey])
+        if whereConditionFieldNumericboolValueTuple != None: 
+            query += " AND " + self.decodeWhereConditionFieldNumericboolValueTuple(whereConditionFieldNumericboolValueTuple)
+        query += ";"
         return query
     
     def createUpdateByIdQuery(self,fieldNumericTupleList) -> str:
@@ -162,6 +180,11 @@ class Model(ModelData):
                 values += "'"+textValue+"', "
         query = query[0:-2] + ") VALUES (" + values[0:-2] + ");"
         return query
+    
+    def insertForeignObject(self,foreignObject: ModelData):
+        #todo - use deliverabledata to create embedded object in this deliverable data
+        pass
+
         
         
 
@@ -259,9 +282,10 @@ class Shelf(Model):
     creator_idKey = "creator_id"
     privacy_idKey = "privacy_id"
     descriptionKey = "description"
+    shuffleKey = "shuffle"
 
     requiredFieldsTuples = [(nameKey,False),(creator_idKey,True),(privacy_idKey,True),(descriptionKey,False)]
-    allDatabaseKeys = [idKey,nameKey,creator_idKey,privacy_idKey,descriptionKey]
+    allDatabaseKeys = [idKey,nameKey,creator_idKey,privacy_idKey,descriptionKey,shuffleKey]
     minimalDatabaseKeys = [idKey, nameKey, descriptionKey]
 
     def __init__(self) -> None:
@@ -288,9 +312,302 @@ class Owned(Model):
     def __init__(self) -> None:
         super().__init__()
 
-    @staticmethod
-    def createGetManyByUserIdQuery(user_id) -> str:
-        return "select * from " + Owned.table + " INNER JOIN "+ Shelf.table +" where " + Owned.user_idKey + " = " + user_id + " ;"
-        
+class Record(Model):
+    table = "shelf.record"
+    tableName = 'record'
+
+    idKey = "id"
+    titleKey = "title" 
+    alias_idKey = "alias_id" 
+    coverKey = "cover" 
+    artist_idKey = "artist_id" 
+    songKey = "song" 
+    parent_record_idKey = "parent_record_id" 
+    collaborationKey = "collaboration"
+
+    primaryForeignKey = alias_idKey
+
+    requiredFieldsTuples = [(titleKey,False),(artist_idKey,True),(alias_idKey,True)]
+    allDatabaseKeys = [idKey,titleKey,alias_idKey,coverKey,artist_idKey,songKey,parent_record_idKey,collaborationKey]
+    minimalDatabaseKeys = [idKey, titleKey, coverKey]
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+class Artist(Model):
+    table = "shelf.artist"
+    tableName = 'artist'
+
+    idKey = "id"
+    primary_alias_idKey = "primary_alias_id"
+    imageKey = "image"
+    shared_nameKey = "shared_name"
+    disambiguation_noteKey = "disambiguation_note"
+
+    primaryForeignKey = primary_alias_idKey
+
+    requiredFieldsTuples = [(primary_alias_idKey,True)] #use 0 default on new artists?
+    allDatabaseKeys = [idKey,primary_alias_idKey,imageKey,shared_nameKey,disambiguation_noteKey]
+    minimalDatabaseKeys = [idKey, primary_alias_idKey]
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+class Alias(Model):
+    table = "shelf.alias"
+    tableName = 'alias'
+
+    idKey = "id"
+    nameKey = "name" 
+    artist_idKey = "artist_id" 
+    vote_idKey = "vote_id"
+
+    primaryForeignKey = vote_idKey
+
+    requiredFieldsTuples = [(nameKey,False),(artist_idKey,True),(vote_idKey,False)]
+    allDatabaseKeys = [idKey,nameKey,artist_idKey,vote_idKey]
+    minimalDatabaseKeys = [idKey, nameKey]
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+    def setVoteId(self,voteId):
+        self.deliverableData[self.vote_idKey] = voteId
+
+class Collaboration(Model):
+    table = "shelf.collaboration"
+    tableName = 'collaboration'
+
+    idKey = "id"
+    record_idKey = "record_id"
+    artist_idKey = "artist_id"
+
+    primaryForeignKey = artist_idKey
+
+    requiredFieldsTuples = [(record_idKey,True),(artist_idKey,True)]
+    allDatabaseKeys = [idKey,record_idKey,artist_idKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+class Connection(Model):
+    table = "shelf.connection"
+    tableName = 'connection'
+
+    idKey = "id"
+    artist_idKey = "artist_id" 
+    connected_artist_idKey = "connected_artist_id" 
+    nature_codeKey = "nature_code"  
+    vote_idKey = "vote_id" 
+
+    primaryForeignKey = connected_artist_idKey
+
+    requiredFieldsTuples = [(artist_idKey,True),(connected_artist_idKey,True),(nature_codeKey,True)]
+    allDatabaseKeys = [idKey,artist_idKey,connected_artist_idKey,nature_codeKey,vote_idKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+class Vote(Model):
+    table = "shelf.vote"
+    tableName = 'vote'
+
+    idKey = "id"
+    up_countKey = "up_count"
+    down_countKey = "down_count"
+
+    requiredFieldsTuples = [(idKey,False)]
+    allDatabaseKeys = [idKey,up_countKey,down_countKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+    def generateId(self):
+        self.deliverableData[self.idKey] = str(uuid.uuid4())
+        return self.deliverableData[self.idKey]
+    
+class Ballot(Model):
+    table = "shelf.ballot"
+    tableName = 'ballot'
+    
+    idKey = "id"
+    vote_idKey = "vote_id"
+    user_idKey = "user_id" 
+    upKey = "up"
+
+    requiredFieldsTuples = [(vote_idKey,False),(user_idKey,True)]
+    allDatabaseKeys = [idKey,vote_idKey,user_idKey,upKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+    
+
+class Blog(Model):
+    table = "shelf.blog"
+    tableName = 'blog'
+
+    idKey = "id"
+    nameKey = "name" 
+    activeKey = "active"
+    record_idKey = "record_id" 
+    user_idKey = "user_id"
+    artist_idKey = "artist_id"
+    standaloneKey = "standalone" 
+    privacy_idKey = "privacy_id"
+    imageKey = "image"
+
+    requiredFieldsTuples = [(nameKey,False)]
+    allDatabaseKeys = [idKey,nameKey,activeKey,record_idKey,user_idKey,artist_idKey,standaloneKey,privacy_idKey,imageKey]
+    minimalDatabaseKeys = [idKey,nameKey]
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+    
+class Post(Model):
+    table = "shelf.post"
+    tableName = 'post'
+
+    idKey = "id"
+    user_idKey = "user_id" 
+    blog_idKey = "blog_id" 
+    textKey = "text" 
+    link_urlKey = "link_url"
+    img_urlKey = "img_url" 
+    postedKey = "posted" 
+    activeKey = "active" 
+    vote_idKey = "vote_id" 
+    privacy_idKey = "privacy_id" 
+    flag_codeKey = "flag_code" 
+    embed_codeKey = "embed_code"
+
+    primaryForeignKey = user_idKey
+
+    requiredFieldsTuples = [(user_idKey,True),(blog_idKey,True),(textKey,False),(postedKey,False),(vote_idKey,False)]
+    allDatabaseKeys = [idKey,user_idKey,blog_idKey,textKey,link_urlKey,img_urlKey,postedKey,activeKey,vote_idKey,privacy_idKey,flag_codeKey ,embed_codeKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+    
+    def setVoteId(self,voteId):
+        self.deliverableData[self.vote_idKey] = voteId
+
+    
+class Follow(Model):
+    table = "shelf.follow"
+    tableName = 'follow'
+
+    idKey = "id"
+    blog_idKey = "blog_id" 
+    user_idKey = "user_id" 
+    activeKey = "active" 
+    homeKey = "home" 
+    home_positionKey = "home_position"
+
+    primaryForeignKey = blog_idKey
+
+    requiredFieldsTuples = [(blog_idKey,True),(user_idKey,True)]
+    allDatabaseKeys = [idKey,blog_idKey,user_idKey,activeKey,homeKey,home_positionKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+class Link(Model):
+    table = "shelf.link"
+    tableName = 'link'
+
+    idKey = "id"
+    urlKey = "url"
+    record_idKey = "record_id"
+    vote_idKey = "vote_id"
+    platform_idKey = "platform_id"
+
+    primaryForeignKey = platform_idKey
+
+    requiredFieldsTuples = [(urlKey,False),(record_idKey,True),(platform_idKey,True)]
+    allDatabaseKeys = [idKey,urlKey,record_idKey,vote_idKey,platform_idKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+    def setVoteId(self,voteId):
+        self.deliverableData[self.vote_idKey] = voteId
+
+class Platform(Model):
+    table = "shelf.platform"
+    tableName = 'platform'
+
+    idKey = "id"
+    nameKey = "name"
+
+    requiredFieldsTuples = [(nameKey,False)]
+    allDatabaseKeys = [idKey,nameKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+class Resource(Model):
+    table = "shelf.resource"
+    tableName = 'resource'
+
+    idKey = "id"
+    urlKey = "url" 
+    record_idKey = "record_id" 
+    variety_codeKey = "variety_code"  
+    vote_idKey = "vote_id" 
+
+    requiredFieldsTuples = [(urlKey,False),(record_idKey,True),(variety_codeKey,True)]
+    allDatabaseKeys = [idKey,urlKey,record_idKey,variety_codeKey,vote_idKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+    def setVoteId(self,voteId):
+        self.deliverableData[self.vote_idKey] = voteId
+
+class Tag(Model):
+    table = "shelf.tag"
+    tableName = 'tag'
+
+    idKey = "id"
+    record_idKey = "record_id" 
+    user_idKey = "user_id" 
+    flavor_idKey = "flavor_id" 
+    activeKey = "active"
+
+    primaryForeignKey = flavor_idKey
+
+    requiredFieldsTuples = [(record_idKey,True),(user_idKey,True),(flavor_idKey,True)]
+    allDatabaseKeys = [idKey,record_idKey,user_idKey,flavor_idKey,activeKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+class Flavor(Model):
+    table = "shelf.flavor"
+    tableName = 'flavor'
+
+    idKey = "id"
+    tagKey = "tag"
+    activeKey = "active"
+
+    requiredFieldsTuples = [(tagKey,False)]
+    allDatabaseKeys = [idKey,tagKey,activeKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+
 
 
