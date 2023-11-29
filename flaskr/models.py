@@ -312,6 +312,25 @@ class Owned(Model):
     def __init__(self) -> None:
         super().__init__()
 
+class Shelved(Model):
+    table = "shelf.shelved"
+    tableName = 'shelved'
+
+    idKey = "id"
+    shelf_idKey = "shelf_id" 
+    record_idKey = "record_id" 
+    activeKey = "active" 
+    sortKey = "sort" 
+    shelvedKey = "shelved" 
+    preview_sortKey = "preview_sort"
+
+    requiredFieldsTuples = [(shelf_idKey,True),(record_idKey,True),(shelvedKey,False)]
+    allDatabaseKeys = [idKey,shelf_idKey,record_idKey,activeKey,sortKey,shelvedKey,preview_sortKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
 class Record(Model):
     table = "shelf.record"
     tableName = 'record'
@@ -467,6 +486,23 @@ class Blog(Model):
     def __init__(self) -> None:
         super().__init__()
 
+class Admin(Model):
+    table = "shelf.admin"
+    tableName = 'admin'
+
+    idKey = "id"
+    user_idKey = "id" 
+    blog_idKey = "id" 
+    ownerKey = "id" 
+    permission_codeKey = "id"
+
+    requiredFieldsTuples = [(user_idKey,True),(blog_idKey,True),(permission_codeKey,True)]
+    allDatabaseKeys = [idKey,user_idKey,blog_idKey,ownerKey,permission_codeKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
+
     
 class Post(Model):
     table = "shelf.post"
@@ -608,6 +644,24 @@ class Flavor(Model):
     def __init__(self) -> None:
         super().__init__()
 
+
+class Suggestion(Model):
+    table = "shelf.suggestion"
+    tableName = 'suggestion'
+
+    idKey = "id"
+    user_idKey = "user_id" 
+    resource_codeKey = "resource_code" 
+    textKey = "text" 
+    addressedKey = "addressed" 
+    validKey = "valid"
+
+    requiredFieldsTuples = [(user_idKey,True),(resource_codeKey,False),(textKey,False)]
+    allDatabaseKeys = [idKey,user_idKey,resource_codeKey,textKey,addressedKey,validKey]
+    minimalDatabaseKeys = []
+    
+    def __init__(self) -> None:
+        super().__init__()
 
 
 
