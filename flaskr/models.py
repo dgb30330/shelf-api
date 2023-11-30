@@ -17,8 +17,10 @@ class ModelData:
     requestBodyData: dict = {}
     deliverableData: dict = {}
 
-    requiredFieldsTuples = [] #(key, boolean to indicate numeric)
+
     allDatabaseKeys = []
+    allDatabaseKeysIsNumeric = []
+    requiredFields = []
     minimalDatabaseKeys = []
 
     joinObject = None
@@ -145,6 +147,18 @@ class Model(ModelData):
         query += ";"
         return query
     
+    def createSelectByConditionQuery(self,whereConditionFieldNumericboolValueTuple=None,minimal=False) -> str:
+        query: str = "select "
+        if not minimal:
+            query += "* "
+        else:
+            for field in self.minimalDatabaseKeys:
+                query += field + ", "
+            query = query[0:-2]
+        query += " from " + self.table + " where " + self.decodeWhereConditionFieldNumericboolValueTuple(whereConditionFieldNumericboolValueTuple)
+        query += ";"
+        return query
+    
     def createUpdateByIdQuery(self,fieldNumericTupleList) -> str:
         query: str = "UPDATE " + self.table + " SET "
         for fieldTuple in fieldNumericTupleList:
@@ -166,24 +180,29 @@ class Model(ModelData):
     def createInsertQuery(self) -> str:
         query: str = "INSERT INTO " + self.table + " ("
         values: str = ""
-        for field in self.requiredFieldsTuples:
-            isNumeric = field[1]
-            if self.deliverableData[field[0]] != None:
-                textValue = self.deliverableData[field[0]]
+        for i in range(len(self.allDatabaseKeys)):
+            isNumeric = self.allDatabaseKeysIsNumeric[i]
+            if self.deliverableData[self.allDatabaseKeys[i]] != None:
+                textValue = self.deliverableData[self.allDatabaseKeys[i]]
             else:
-                textValue = 'null'
-                isNumeric = True
-            query += "`"+field[0]+"`, "
+                if self.allDatabaseKeys[i] in self.requiredFields:
+                    textValue = 'null'
+                    isNumeric = True
+                else:
+                    continue
+            query += "`"+self.allDatabaseKeys[i]+"`, "
             if isNumeric:
                 values += textValue+", "
             else:
-                values += "'"+textValue+"', "
+                values += '"'+textValue+'", '
         query = query[0:-2] + ") VALUES (" + values[0:-2] + ");"
         return query
     
-    def insertForeignObject(self,foreignObject: ModelData):
-        #todo - use deliverabledata to create embedded object in this deliverable data
-        pass
+    def insertForeignObject(self,keyString,object):
+        self.deliverableData[keyString] = object
+
+    def setVoteId(self,voteId):
+        self.deliverableData[self.vote_idKey] = voteId
 
         
         
@@ -205,8 +224,9 @@ class User(Model):
     passwordKey = 'password'
     signatureKey = 'signature'
 
-    requiredFieldsTuples = [(displaynameKey,False), (emailKey,False), (imageKey,False), (privacy_idKey,True), (createdKey,False), (last_loginKey,False), (passwordKey,False), (signatureKey,False)]
+    requiredFields = [displaynameKey,emailKey,imageKey,privacy_idKey,createdKey,last_loginKey,passwordKey,signatureKey]
     allDatabaseKeys = [idKey, displaynameKey, emailKey, imageKey, privacy_idKey, createdKey, last_loginKey, activeKey, passwordKey, signatureKey]
+    allDatabaseKeysIsNumeric = [True,False,False,False,True,False,False,True,False,False]
     minimalDatabaseKeys = [idKey, displaynameKey, imageKey]
 
     def __init__(self) -> None:
@@ -284,8 +304,9 @@ class Shelf(Model):
     descriptionKey = "description"
     shuffleKey = "shuffle"
 
-    requiredFieldsTuples = [(nameKey,False),(creator_idKey,True),(privacy_idKey,True),(descriptionKey,False)]
+    requiredFields = [nameKey,creator_idKey,privacy_idKey,descriptionKey]
     allDatabaseKeys = [idKey,nameKey,creator_idKey,privacy_idKey,descriptionKey,shuffleKey]
+    allDatabaseKeysIsNumeric = [True,False,True,True,False,True]
     minimalDatabaseKeys = [idKey, nameKey, descriptionKey]
 
     def __init__(self) -> None:
@@ -305,8 +326,9 @@ class Owned(Model):
 
     primaryForeignKey = shelf_idKey
 
-    requiredFieldsTuples = [(shelf_idKey,True),(user_idKey,True),(addedKey,False)]
+    requiredFields = [shelf_idKey,user_idKey,addedKey]
     allDatabaseKeys = [idKey,shelf_idKey,user_idKey,activeKey,addedKey,homeKey,home_positionKey]
+    allDatabaseKeysIsNumeric = [True,True,True,True,False,True,True]
     minimalDatabaseKeys = [idKey, user_idKey]
     
     def __init__(self) -> None:
@@ -324,8 +346,9 @@ class Shelved(Model):
     shelvedKey = "shelved" 
     preview_sortKey = "preview_sort"
 
-    requiredFieldsTuples = [(shelf_idKey,True),(record_idKey,True),(shelvedKey,False)]
+    requiredFields = [shelf_idKey,record_idKey,shelvedKey]
     allDatabaseKeys = [idKey,shelf_idKey,record_idKey,activeKey,sortKey,shelvedKey,preview_sortKey]
+    allDatabaseKeysIsNumeric = [True,True,True,True,True,False,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -346,8 +369,9 @@ class Record(Model):
 
     primaryForeignKey = alias_idKey
 
-    requiredFieldsTuples = [(titleKey,False),(artist_idKey,True),(alias_idKey,True)]
+    requiredFields = [titleKey,artist_idKey,alias_idKey]
     allDatabaseKeys = [idKey,titleKey,alias_idKey,coverKey,artist_idKey,songKey,parent_record_idKey,collaborationKey]
+    allDatabaseKeysIsNumeric = [True,False,True,False,True,True,True,True]
     minimalDatabaseKeys = [idKey, titleKey, coverKey]
     
     def __init__(self) -> None:
@@ -365,12 +389,16 @@ class Artist(Model):
 
     primaryForeignKey = primary_alias_idKey
 
-    requiredFieldsTuples = [(primary_alias_idKey,True)] #use 0 default on new artists?
+    requiredFields = [primary_alias_idKey] #Always create alias first
     allDatabaseKeys = [idKey,primary_alias_idKey,imageKey,shared_nameKey,disambiguation_noteKey]
+    allDatabaseKeysIsNumeric = [True,True,False,True,False]
     minimalDatabaseKeys = [idKey, primary_alias_idKey]
     
     def __init__(self) -> None:
         super().__init__()
+
+    def setPrimaryAlias(self,alias_id: str):
+        self.deliverableData[self.primary_alias_idKey] = alias_id
 
 class Alias(Model):
     table = "shelf.alias"
@@ -383,15 +411,22 @@ class Alias(Model):
 
     primaryForeignKey = vote_idKey
 
-    requiredFieldsTuples = [(nameKey,False),(artist_idKey,True),(vote_idKey,False)]
+    requiredFields = [nameKey,artist_idKey,vote_idKey] #for new artists use id 1 then change after insert
     allDatabaseKeys = [idKey,nameKey,artist_idKey,vote_idKey]
+    allDatabaseKeysIsNumeric = [True,False,True,False]
     minimalDatabaseKeys = [idKey, nameKey]
     
     def __init__(self) -> None:
         super().__init__()
 
-    def setVoteId(self,voteId):
-        self.deliverableData[self.vote_idKey] = voteId
+    def setNewArtistHold(self):
+        self.deliverableData[self.artist_idKey] = '1'
+
+    def createGetIdByNameVoteQuery(self) -> str:
+        query: str = "select "+self.idKey+" from " + self.table + " where "+self.nameKey+" = '" + self.deliverableData[self.nameKey] + "' AND "+self.vote_idKey+" = '" + self.deliverableData[self.vote_idKey] + "';"
+        return query
+
+
 
 class Collaboration(Model):
     table = "shelf.collaboration"
@@ -403,8 +438,10 @@ class Collaboration(Model):
 
     primaryForeignKey = artist_idKey
 
-    requiredFieldsTuples = [(record_idKey,True),(artist_idKey,True)]
+    #Found from Record ID, used to populate additional artist links
+    requiredFields = [record_idKey,artist_idKey]
     allDatabaseKeys = [idKey,record_idKey,artist_idKey]
+    allDatabaseKeysIsNumeric = [True,True,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -422,8 +459,9 @@ class Connection(Model):
 
     primaryForeignKey = connected_artist_idKey
 
-    requiredFieldsTuples = [(artist_idKey,True),(connected_artist_idKey,True),(nature_codeKey,True)]
+    requiredFields = [artist_idKey,connected_artist_idKey,nature_codeKey]
     allDatabaseKeys = [idKey,artist_idKey,connected_artist_idKey,nature_codeKey,vote_idKey]
+    allDatabaseKeysIsNumeric = [True,True,True,True,False]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -437,8 +475,9 @@ class Vote(Model):
     up_countKey = "up_count"
     down_countKey = "down_count"
 
-    requiredFieldsTuples = [(idKey,False)]
+    requiredFields = [idKey]
     allDatabaseKeys = [idKey,up_countKey,down_countKey]
+    allDatabaseKeysIsNumeric = [False,True,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -457,8 +496,9 @@ class Ballot(Model):
     user_idKey = "user_id" 
     upKey = "up"
 
-    requiredFieldsTuples = [(vote_idKey,False),(user_idKey,True)]
+    requiredFields = [vote_idKey,user_idKey]
     allDatabaseKeys = [idKey,vote_idKey,user_idKey,upKey]
+    allDatabaseKeysIsNumeric = [True,False,True,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -479,8 +519,9 @@ class Blog(Model):
     privacy_idKey = "privacy_id"
     imageKey = "image"
 
-    requiredFieldsTuples = [(nameKey,False)]
+    requiredFields = [nameKey]
     allDatabaseKeys = [idKey,nameKey,activeKey,record_idKey,user_idKey,artist_idKey,standaloneKey,privacy_idKey,imageKey]
+    allDatabaseKeysIsNumeric = [True,False,True,True,True,True,True,True,False]
     minimalDatabaseKeys = [idKey,nameKey]
     
     def __init__(self) -> None:
@@ -496,8 +537,9 @@ class Admin(Model):
     ownerKey = "id" 
     permission_codeKey = "id"
 
-    requiredFieldsTuples = [(user_idKey,True),(blog_idKey,True),(permission_codeKey,True)]
+    requiredFields = [user_idKey,blog_idKey,permission_codeKey]
     allDatabaseKeys = [idKey,user_idKey,blog_idKey,ownerKey,permission_codeKey]
+    allDatabaseKeysIsNumeric = [True,True,True,True,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -523,15 +565,14 @@ class Post(Model):
 
     primaryForeignKey = user_idKey
 
-    requiredFieldsTuples = [(user_idKey,True),(blog_idKey,True),(textKey,False),(postedKey,False),(vote_idKey,False)]
-    allDatabaseKeys = [idKey,user_idKey,blog_idKey,textKey,link_urlKey,img_urlKey,postedKey,activeKey,vote_idKey,privacy_idKey,flag_codeKey ,embed_codeKey]
+    requiredFields = [user_idKey,blog_idKey,textKey,postedKey,vote_idKey,]
+    allDatabaseKeys = [idKey,user_idKey,blog_idKey,textKey,link_urlKey,img_urlKey,postedKey,activeKey,vote_idKey,privacy_idKey,flag_codeKey,embed_codeKey]
+    allDatabaseKeysIsNumeric = [True,True,True,False,False,False,False,True,False,True,True,False]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
         super().__init__()
-    
-    def setVoteId(self,voteId):
-        self.deliverableData[self.vote_idKey] = voteId
+
 
     
 class Follow(Model):
@@ -547,8 +588,9 @@ class Follow(Model):
 
     primaryForeignKey = blog_idKey
 
-    requiredFieldsTuples = [(blog_idKey,True),(user_idKey,True)]
+    requiredFields = [blog_idKey,user_idKey]
     allDatabaseKeys = [idKey,blog_idKey,user_idKey,activeKey,homeKey,home_positionKey]
+    allDatabaseKeysIsNumeric = [True,True,True,True,True,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -564,17 +606,15 @@ class Link(Model):
     vote_idKey = "vote_id"
     platform_idKey = "platform_id"
 
-    primaryForeignKey = platform_idKey
+    primaryForeignKey = vote_idKey
 
-    requiredFieldsTuples = [(urlKey,False),(record_idKey,True),(platform_idKey,True)]
+    requiredFields = [urlKey,record_idKey,platform_idKey,vote_idKey]
     allDatabaseKeys = [idKey,urlKey,record_idKey,vote_idKey,platform_idKey]
+    allDatabaseKeysIsNumeric = [True,False,True,False,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
         super().__init__()
-
-    def setVoteId(self,voteId):
-        self.deliverableData[self.vote_idKey] = voteId
 
 class Platform(Model):
     table = "shelf.platform"
@@ -583,8 +623,9 @@ class Platform(Model):
     idKey = "id"
     nameKey = "name"
 
-    requiredFieldsTuples = [(nameKey,False)]
+    requiredFields = [nameKey]
     allDatabaseKeys = [idKey,nameKey]
+    allDatabaseKeysIsNumeric = [True,False]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -599,16 +640,16 @@ class Resource(Model):
     record_idKey = "record_id" 
     variety_codeKey = "variety_code"  
     vote_idKey = "vote_id" 
+    
+    primaryForeignKey = vote_idKey
 
-    requiredFieldsTuples = [(urlKey,False),(record_idKey,True),(variety_codeKey,True)]
+    requiredFields = [urlKey,record_idKey,variety_codeKey,vote_idKey,]
     allDatabaseKeys = [idKey,urlKey,record_idKey,variety_codeKey,vote_idKey]
+    allDatabaseKeysIsNumeric = [True,False,True,True,False]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
         super().__init__()
-
-    def setVoteId(self,voteId):
-        self.deliverableData[self.vote_idKey] = voteId
 
 class Tag(Model):
     table = "shelf.tag"
@@ -622,8 +663,9 @@ class Tag(Model):
 
     primaryForeignKey = flavor_idKey
 
-    requiredFieldsTuples = [(record_idKey,True),(user_idKey,True),(flavor_idKey,True)]
+    requiredFields = [record_idKey,user_idKey,flavor_idKey]
     allDatabaseKeys = [idKey,record_idKey,user_idKey,flavor_idKey,activeKey]
+    allDatabaseKeysIsNumeric = [True,True,True,True,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -637,8 +679,9 @@ class Flavor(Model):
     tagKey = "tag"
     activeKey = "active"
 
-    requiredFieldsTuples = [(tagKey,False)]
+    requiredFields = [tagKey]
     allDatabaseKeys = [idKey,tagKey,activeKey]
+    allDatabaseKeysIsNumeric = [True,False,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:
@@ -656,8 +699,9 @@ class Suggestion(Model):
     addressedKey = "addressed" 
     validKey = "valid"
 
-    requiredFieldsTuples = [(user_idKey,True),(resource_codeKey,False),(textKey,False)]
+    requiredFields = [user_idKey,resource_codeKey,textKey]
     allDatabaseKeys = [idKey,user_idKey,resource_codeKey,textKey,addressedKey,validKey]
+    allDatabaseKeysIsNumeric = [True,True,False,False,True,True]
     minimalDatabaseKeys = []
     
     def __init__(self) -> None:

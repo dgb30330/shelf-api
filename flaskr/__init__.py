@@ -26,7 +26,7 @@ def create_app(test_config=None):
 
     mysql = MySQL(app)
 
-    masterSecurityBypass = False
+    masterSecurityBypass = True #for token needs - True for free dev mode
 
     if test_config is None:
         # load the instance config, if it exists, when not testing
@@ -136,15 +136,7 @@ def create_app(test_config=None):
     def shelves(options,user_id):
         #expected body {'shelf_id':'x','user_id':'x','added':'YYYY-MM-DD HH:MM:SS.XX'}
         if request.method == 'POST':
-            newOwnedShelf = flaskr.models.Owned()
-            newOwnedShelf.populateFromRequest(request.data)
-            try:
-                cur = mysql.connection.cursor()
-                cur.execute(newOwnedShelf.createInsertQuery())
-                mysql.connection.commit()
-                return str(True)
-            except Exception as e:
-                return str(e)
+            return flaskr.helpers.simpleInsert(request,mysql,flaskr.models.Owned())
         elif request.method == 'PUT':
             pass
         else:
@@ -171,6 +163,7 @@ def create_app(test_config=None):
                     cur = mysql.connection.cursor()
                     cur.execute(newShelf.createInsertQuery())
                     mysql.connection.commit()
+                    cur.close()
                     return str(True)
                     #TODO create owned for creator here
                 except Exception as e:
@@ -213,15 +206,7 @@ def create_app(test_config=None):
         #expected body {'title':'xxx','artist_id':'x','alias_id':'x'}
         if request.method == 'POST':
             #if artist/alias is new, must be called before this operation
-            newRecord = flaskr.models.Record()
-            newRecord.populateFromRequest(request.data)
-            try:
-                cur = mysql.connection.cursor()
-                cur.execute(newRecord.createInsertQuery())
-                mysql.connection.commit()
-                return str(True)
-            except Exception as e:
-                    return str(e)
+            return flaskr.helpers.simpleInsert(request,mysql,flaskr.models.Record())
 
         elif request.method == 'PUT':
             pass
@@ -230,8 +215,17 @@ def create_app(test_config=None):
             thisRecord.setId(record_id)
             cur = mysql.connection.cursor()
             cur.execute(thisRecord.createJoinQuery(flaskr.models.Alias(),otherMinimum=True))
-            rv = cur.fetchall()
             #TODO if parent_record_id is not null - retrieve and return parent - correct?
+            rv = cur.fetchall()
+            thisRecord.prepJoinedDatabaseReturn(rv)
+            links = flaskr.models.Link()
+            cur.execute(links.createSelectByConditionQuery((links.record_idKey,True,record_id)))
+            links_rv = cur.fetchall()
+            thisRecord.insertForeignObject(links.tableName,links.manyDatabaseReturns(links_rv))
+            resources = flaskr.models.Resource()
+            cur.execute(resources.createSelectByConditionQuery((resources.record_idKey,True,record_id)))
+            resources_rv = cur.fetchall()
+            thisRecord.insertForeignObject(resources.tableName,resources.manyDatabaseReturns(resources_rv))
             return thisRecord.prepJoinedDatabaseReturn(rv)
 
 
@@ -240,15 +234,27 @@ def create_app(test_config=None):
     def record_lite(record_id):
         pass
 
-    @app.route('/links/<record_id>', methods = ['GET','POST','PUT'])
+    @app.route('/link/<record_id>', methods = ['GET','POST','PUT'])
     #to handle streamin links by record  
-    def links(record_id):
-        pass
+    def link(record_id):
+        #expected body {'url':'xxx','record_id':'x','platform_id':'x'}
+        if request.method == 'POST':
+            return flaskr.helpers.simpleInsert(request,mysql,flaskr.models.Link(),insertVote=True)
+        elif request.method == 'PUT':
+            pass
+        else:
+            pass
 
-    @app.route('/resources/<record_id>', methods = ['GET','POST','PUT'])
+    @app.route('/resource/<record_id>', methods = ['GET','POST','PUT'])
     #to handle resource links by record  
-    def resources(record_id):
-        pass
+    def resource(record_id):
+        #expected body {'url':'xxx','record_id':'x','variety_code':'x'}
+        if request.method == 'POST':
+            return flaskr.helpers.simpleInsert(request,mysql,flaskr.models.Resource(),insertVote=True)
+        elif request.method == 'PUT':
+            pass
+        else:
+            pass
 
     @app.route('/artist/<artist_id>', methods = ['GET','POST','PUT'])
     #to handle individual artists in detail  
@@ -256,9 +262,19 @@ def create_app(test_config=None):
         if request.method == 'POST':
             #how do handle ALIAS on create?
             newArtist = flaskr.models.Artist()
-            newArtist.populateFromRequest(request.data)
+            newAlias = flaskr.models.Alias()
+            newAlias.populateFromRequest(request.data)
+            newAlias.setNewArtistHold()
+            newVote = flaskr.models.Vote()
+            newAlias.setVoteId(newVote.generateId())
             try:
                 cur = mysql.connection.cursor()
+                cur.execute(newVote.createInsertQuery())
+                cur.execute(newAlias.createInsertQuery())
+                mysql.connection.commit()
+                cur.execute(newAlias.createGetIdByNameVoteQuery())
+                rv = cur.fetchall()
+                newArtist.setPrimaryAlias(str(rv[0][0]))
                 cur.execute(newArtist.createInsertQuery())
                 mysql.connection.commit()
                 return str(True)
@@ -285,20 +301,7 @@ def create_app(test_config=None):
     #needed options definitions - 'all' 'home'  
     def alias(alias_id):
         if request.method == 'POST':
-            newAlias = flaskr.models.Alias()
-            newAlias.populateFromRequest(request.data)
-            newVote = flaskr.models.Vote()
-            newAlias.setVoteId(newVote.generateId())
-            try:
-                cur = mysql.connection.cursor()
-                #return newVote.createInsertQuery()
-                cur.execute(newVote.createInsertQuery())
-                cur.execute(newAlias.createInsertQuery())
-                mysql.connection.commit()
-                return str(True)
-            except Exception as e:
-                    return str(e)
-
+            return flaskr.helpers.simpleInsert(request,mysql,flaskr.models.Alias(),insertVote=True)
         elif request.method == 'PUT':
             pass
         else:
@@ -319,14 +322,7 @@ def create_app(test_config=None):
         #expected body {'blog_id':'x','user_id':'x'}
         if request.method == 'POST':
             newBlogFollow = flaskr.models.Follow()
-            newBlogFollow.populateFromRequest(request.data)
-            try:
-                cur = mysql.connection.cursor()
-                cur.execute(newBlogFollow.createInsertQuery())
-                mysql.connection.commit()
-                return str(True)
-            except Exception as e:
-                return str(e)
+            return flaskr.helpers.simpleInsert(request,mysql,newBlogFollow)
         elif request.method == 'PUT':
             pass
         else:
@@ -344,17 +340,7 @@ def create_app(test_config=None):
     def blog(options,blog_id):
         #expected body {'name':'xxx'}
         if request.method == 'POST':
-            #if artist/alias is new, must be called before this operation
-            newBlog = flaskr.models.Blog()
-            newBlog.populateFromRequest(request.data)
-            try:
-                cur = mysql.connection.cursor()
-                cur.execute(newBlog.createInsertQuery())
-                mysql.connection.commit()
-                return str(True)
-            except Exception as e:
-                    return str(e)
-
+            return flaskr.helpers.simpleInsert(request,mysql,flaskr.models.Blog())
         elif request.method == 'PUT':
             pass
         else:
@@ -389,19 +375,7 @@ def create_app(test_config=None):
     def post(post_id):
         #expected body {'user_id':'x','blog_id':'x','text':'xxx','posted':'YYYY-MM-DD HH:MM:SS.XX','vote_id':'xxx'}
         if request.method == 'POST':
-            newPost = flaskr.models.Post()
-            newPost.populateFromRequest(request.data)
-            newVote = flaskr.models.Vote()
-            newPost.setVoteId(newVote.generateId())
-            try:
-                cur = mysql.connection.cursor()
-                cur.execute(newVote.createInsertQuery())
-                cur.execute(newPost.createInsertQuery())
-                mysql.connection.commit()
-                return str(True)
-            except Exception as e:
-                return str(e)
-
+            return flaskr.helpers.simpleInsert(request,mysql,flaskr.models.Post(),insertVote=True)
         elif request.method == 'PUT':
             pass
         else:
@@ -411,6 +385,13 @@ def create_app(test_config=None):
             cur.execute(thisPost.createJoinQuery(flaskr.models.User(),otherMinimum=True))
             rv = cur.fetchall()
             return thisPost.prepJoinedDatabaseReturn(rv)
+        
+    @app.route('/ssr/<record_id>')
+    #minimal return for preview  
+    def ssr(record_id):
+        thisRecord = flaskr.models.Record()
+        thisRecord.prepDatabaseReturn(flaskr.helpers.simpleDatabaseGet(record_id,mysql,thisRecord))
+        return flaskr.helpers.getRecordHtml(thisRecord)
 
     
 
