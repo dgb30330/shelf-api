@@ -7,6 +7,9 @@ def dictFromRaw(responseData: bytes):
     newDict = json.loads(data)
     return newDict
 
+def encode(incoming):
+    return json.dumps(incoming, separators=(',', ':'))
+
 def printableType(variableInQuestion):
     typeString = str(type(variableInQuestion))
     return typeString
@@ -24,6 +27,7 @@ def tokenValidation(request,mysql):
     cur.execute(thisUser.createGetAllByIdQuery())
     userData = cur.fetchall()
     thisUser.prepDatabaseReturn(userData)
+    cur.close()
     if deliveredSignature == thisUser.getSignature():
         isValid = True
     return isValid
@@ -42,9 +46,26 @@ def simpleInsert(request,mysql,dataModelObject: flaskr.models.Model,insertVote =
         #return dataModelObject.createInsertQuery()
         cur.execute(dataModelObject.createInsertQuery())
         mysql.connection.commit()
+        cur.close()
         return str(True)
     except Exception as e:
             return str(e)
+    
+def simpleUpdate(id,request,mysql,dataModelObject: flaskr.models.Model):
+    dataModelObject.setId(id)
+    dataModelObject.populateFromRequest(request.data,forUpdate=True)
+    try:
+        cur = mysql.connection.cursor()
+        #for debug
+        #return dataModelObject.createUpdateQuery()
+        cur.execute(dataModelObject.createUpdateQuery())
+        mysql.connection.commit()
+        changedData = simpleDatabaseGet(id,mysql,dataModelObject)
+        cur.close()
+        return changedData
+    except Exception as e:
+        return str(e)
+        
     
 def simpleDatabaseGet(id,mysql,dataModelObject: flaskr.models.Model,minimal=False):
         dataModelObject.setId(id)
@@ -52,7 +73,8 @@ def simpleDatabaseGet(id,mysql,dataModelObject: flaskr.models.Model,minimal=Fals
             cur = mysql.connection.cursor()
             cur.execute(dataModelObject.createSelectByIdQuery())
             rv = cur.fetchall()
-            return rv
+            cur.close()
+            return dataModelObject.prepDatabaseReturn(rv)
         except Exception as e:
             return str(e)
     

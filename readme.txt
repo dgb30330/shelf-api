@@ -13,3 +13,7 @@ install: pip install Flask-MySQLdb
 
 jwt library: https://pyjwt.readthedocs.io/en/stable/
 install: pip install pyjwt
+
+flask_cors library: https://flask-cors.readthedocs.io/en/latest/
+install: pip install -U flask-cors
+(possibly unnecessary in prod)

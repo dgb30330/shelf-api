@@ -25,6 +25,8 @@ class ModelData:
 
     joinObject = None
     allJoinedKeys = [] #does not need pre-populated
+    toUpdate = [] #does not need pre-populated
+    queryConditions = [] #does not need pre-populated
 
 class Model(ModelData):
 
@@ -33,7 +35,7 @@ class Model(ModelData):
 
 
     def setId(self,incomingId):
-        self.deliverableData[self.idKey] = incomingId      
+        self.deliverableData[self.idKey] = str(incomingId)     
 
     def dictFromRaw(self, responseData: bytes):
         data = responseData.decode('UTF-8')
@@ -41,10 +43,14 @@ class Model(ModelData):
         newDict = json.loads(data)
         return newDict
     
-    def populateFromRequest(self,rawBody: bytes):
+    def populateFromRequest(self,rawBody: bytes,forUpdate=False):
+        if forUpdate:
+            self.toUpdate = []
         self.requestBodyData = self.dictFromRaw(rawBody)
         for key in self.requestBodyData:
             self.deliverableData[key] = self.requestBodyData[key]
+            if forUpdate:
+                self.toUpdate.append(key)
     
     def prepDatabaseReturn(self,databaseData: tuple, minimal=False):
         if minimal:
@@ -95,7 +101,9 @@ class Model(ModelData):
         else:
             whereCondition += "'"+whereConditionFieldNumericboolValueTuple[2]+"'"
         return whereCondition
-
+    
+    def setCondition(self,whereConditionFieldNumericboolValueTuple):
+        self.queryConditions.append(whereConditionFieldNumericboolValueTuple)
 
     def createJoinQuery(self,otherTableObject: ModelData, whereConditionFieldNumericboolValueTuple=None, foreignKey = None, thisMinimum = False, otherMinimum = False) -> str:
         #set conditions
@@ -130,7 +138,11 @@ class Model(ModelData):
             self.allJoinedKeys.append(tableField)
             query +=  tableField + ", "
         
-        query = query[0:-2] + " from " + self.table + " INNER JOIN "+ otherTableObject.table +" where " + whereCondition + " AND "+ relationCondition +";"
+        query = query[0:-2] + " from " + self.table + " INNER JOIN "+ otherTableObject.table +" where " + whereCondition + " AND "+ relationCondition 
+        if len(self.queryConditions)>0:
+            for conditionTuple in self.queryConditions:
+                query = query + " AND " + self.decodeWhereConditionFieldNumericboolValueTuple(conditionTuple)    
+        query += ";"
         return query 
     
     def createSelectByIdQuery(self,minimal=False,whereConditionFieldNumericboolValueTuple=None) -> str:
@@ -159,21 +171,18 @@ class Model(ModelData):
         query += ";"
         return query
     
-    def createUpdateByIdQuery(self,fieldNumericTupleList) -> str:
+    def createUpdateQuery(self) -> str:
+        ## !!! request body MUST match db fields - Id must be set
         query: str = "UPDATE " + self.table + " SET "
-        for fieldTuple in fieldNumericTupleList:
-            isNumeric = fieldTuple[1]
-            if self.deliverableData[fieldTuple[0]] != None:
-                textValue = self.deliverableData[fieldTuple[0]]
-            else:
-                textValue = 'null'
-                isNumeric = True
-            query += fieldTuple[0]+"="
-            if isNumeric:
-                query += textValue+", "
-            else:
-                query += "'"+textValue+"', "
-        query = query[0:-2] + "WHERE " +self.idKey+"="+str(self.deliverableData[self.idKey])
+        for i in range(len(self.allDatabaseKeys)):
+            if self.allDatabaseKeys[i] in self.toUpdate:
+                isNumeric = self.allDatabaseKeysIsNumeric[i]
+                query += self.allDatabaseKeys[i] + "="
+                if isNumeric:
+                    query += self.deliverableData[self.allDatabaseKeys[i]]+", "
+                else:
+                    query += "'"+self.deliverableData[self.allDatabaseKeys[i]]+"', " 
+        query = query[0:-2] + " WHERE " +self.idKey+"="+str(self.deliverableData[self.idKey])
         return query
 
 
@@ -204,8 +213,75 @@ class Model(ModelData):
     def setVoteId(self,voteId):
         self.deliverableData[self.vote_idKey] = voteId
 
+class Searchable(Model):
+    searchFields = []
+    searchJoin: ModelData = None
+    searchJoinField = None
+    searchForeignKey = None
+    searchLimit = 20
+    searchSort = None
+    searchActiveOnly = True
+
+    def createSearchQuery(self, searchString, thisMinimum = False, otherMinimum = False) -> str:
+        #set conditions
+        if self.searchJoin != None:
+            otherTableObject: ModelData = self.searchJoin
+            foreignKey = self.searchForeignKey
+            relationCondition = self.tableName + "." + foreignKey + " = " + otherTableObject.tableName + "." + otherTableObject.idKey
+            
+        #operational data
+        if thisMinimum:
+            thisKeysList = self.minimalDatabaseKeys
+        else:
+            thisKeysList = self.allDatabaseKeys
+        if self.searchJoin != None:
+            if otherMinimum:
+                otherKeysList = otherTableObject.minimalDatabaseKeys
+            else:
+                otherKeysList = otherTableObject.allDatabaseKeys
+        self.allJoinedKeys = []
+
+        #set fields to return
+        query = "select "
+        for field in thisKeysList:
+            self.allJoinedKeys.append(field)
+            query += self.tableName + "." + field + ", "
+        if self.searchJoin != None:
+            for field in otherKeysList:
+                tableField = otherTableObject.tableName + "." + field
+                self.allJoinedKeys.append(tableField)
+                query +=  tableField + ", "
         
-        
+        query = query[0:-2] + " from " + self.table
+        if self.searchJoin != None:
+            query += " INNER JOIN "+ otherTableObject.table 
+        query += " WHERE " 
+        if self.searchJoin != None:
+            query += relationCondition + " AND "
+        query += "("
+        parentheticalFirst = True
+        for field in self.searchFields:
+            if not parentheticalFirst:
+                query+= " OR "
+            parentheticalFirst = False
+            query+= self.tableName + "." +field + " LIKE '%"+ searchString +"%'"
+        if self.searchJoinField != None:
+            query+= " OR " + self.searchJoin.tableName + "." + self.searchJoinField + " LIKE '%"+ searchString +"%'"
+        query += ")"
+        if len(self.queryConditions)>0:
+            for conditionTuple in self.queryConditions:
+                query = query + " AND " + self.decodeWhereConditionFieldNumericboolValueTuple(conditionTuple)   
+        if self.searchActiveOnly:
+            query+= " AND active = 1"
+        if self.searchSort != None:
+            query += " ORDER BY " + self.tableName + "." + self.searchSort  
+        query += " LIMIT "+str(self.searchLimit)
+        query += ";"
+        return query
+    
+    def __init__(self) -> None:
+        super().__init__()
+
 
 
 
@@ -268,8 +344,10 @@ class User(Model):
     
     def createLoginUpdate(self) -> str:
         self.generateSignature()
-        loginNeedTupleList = [(self.last_loginKey,False), (self.signatureKey,False)]
-        return self.createUpdateByIdQuery(loginNeedTupleList)
+        self.toUpdate.append(self.last_loginKey)
+        self.toUpdate.append(self.signatureKey)
+        #loginNeedTupleList = [(self.last_loginKey,False), (self.signatureKey,False)]
+        return self.createUpdateQuery()
     
     def getToken(self):
         payload = {self.idKey:self.deliverableData[self.idKey],self.signatureKey:self.deliverableData[self.signatureKey]}
@@ -291,9 +369,10 @@ class User(Model):
         del dictForReturn[self.signatureKey]
         return dictForReturn
     
+    
 
 
-class Shelf(Model):
+class Shelf(Searchable):
     table = "shelf.shelf"
     tableName = 'shelf'
 
@@ -308,9 +387,34 @@ class Shelf(Model):
     allDatabaseKeys = [idKey,nameKey,creator_idKey,privacy_idKey,descriptionKey,shuffleKey]
     allDatabaseKeysIsNumeric = [True,False,True,True,False,True]
     minimalDatabaseKeys = [idKey, nameKey, descriptionKey]
+    queryConditions = []
+
+    searchFields = [nameKey,descriptionKey]
+    searchJoin: ModelData = User()
+    searchJoinField = searchJoin.displaynameKey
+    searchForeignKey = creator_idKey
+    searchLimit = 20
+    searchSort = nameKey
+    searchActiveOnly = False
 
     def __init__(self) -> None:
         super().__init__()
+
+    def createGetByRecordAndUserQuery(self,record_id,user_id):
+        ownedModel = Owned()
+        shelvedModel = Shelved()
+        query = "select " 
+        for key in self.allDatabaseKeys:
+            query += self.tableName + "." + key + ", "
+        query = query[0:-2]
+        query += " from " + self.table
+        query += " INNER JOIN " + ownedModel.table + " ON " +self.tableName + "." + self.idKey + " = " + ownedModel.tableName + "." + ownedModel.shelf_idKey 
+        query += " INNER JOIN " + shelvedModel.table + " ON " + ownedModel.tableName + "." + ownedModel.shelf_idKey + " = " + shelvedModel.tableName + "." + shelvedModel.shelf_idKey
+        query += " WHERE " + ownedModel.tableName + "." + ownedModel.user_idKey + " = " + user_id + " AND " 
+        query += shelvedModel.tableName + "." + shelvedModel.record_idKey + " = " + record_id
+        query += " AND " + shelvedModel.tableName + "." + shelvedModel.activeKey + " = 1 AND " + ownedModel.tableName + "." + ownedModel.activeKey + " = 1;"
+        return query
+
 
 class Owned(Model):
     table = "shelf.owned"
@@ -323,12 +427,13 @@ class Owned(Model):
     addedKey = "added"
     homeKey = "home"
     home_positionKey = "home_position"
+    editKey = "edit"
 
     primaryForeignKey = shelf_idKey
 
     requiredFields = [shelf_idKey,user_idKey,addedKey]
-    allDatabaseKeys = [idKey,shelf_idKey,user_idKey,activeKey,addedKey,homeKey,home_positionKey]
-    allDatabaseKeysIsNumeric = [True,True,True,True,False,True,True]
+    allDatabaseKeys = [idKey,shelf_idKey,user_idKey,activeKey,addedKey,homeKey,home_positionKey,editKey]
+    allDatabaseKeysIsNumeric = [True,True,True,True,False,True,True,True]
     minimalDatabaseKeys = [idKey, user_idKey]
     
     def __init__(self) -> None:
@@ -346,33 +451,12 @@ class Shelved(Model):
     shelvedKey = "shelved" 
     preview_sortKey = "preview_sort"
 
+    primaryForeignKey = record_idKey
+
     requiredFields = [shelf_idKey,record_idKey,shelvedKey]
     allDatabaseKeys = [idKey,shelf_idKey,record_idKey,activeKey,sortKey,shelvedKey,preview_sortKey]
     allDatabaseKeysIsNumeric = [True,True,True,True,True,False,True]
     minimalDatabaseKeys = []
-    
-    def __init__(self) -> None:
-        super().__init__()
-
-class Record(Model):
-    table = "shelf.record"
-    tableName = 'record'
-
-    idKey = "id"
-    titleKey = "title" 
-    alias_idKey = "alias_id" 
-    coverKey = "cover" 
-    artist_idKey = "artist_id" 
-    songKey = "song" 
-    parent_record_idKey = "parent_record_id" 
-    collaborationKey = "collaboration"
-
-    primaryForeignKey = alias_idKey
-
-    requiredFields = [titleKey,artist_idKey,alias_idKey]
-    allDatabaseKeys = [idKey,titleKey,alias_idKey,coverKey,artist_idKey,songKey,parent_record_idKey,collaborationKey]
-    allDatabaseKeysIsNumeric = [True,False,True,False,True,True,True,True]
-    minimalDatabaseKeys = [idKey, titleKey, coverKey]
     
     def __init__(self) -> None:
         super().__init__()
@@ -392,7 +476,8 @@ class Artist(Model):
     requiredFields = [primary_alias_idKey] #Always create alias first
     allDatabaseKeys = [idKey,primary_alias_idKey,imageKey,shared_nameKey,disambiguation_noteKey]
     allDatabaseKeysIsNumeric = [True,True,False,True,False]
-    minimalDatabaseKeys = [idKey, primary_alias_idKey]
+    minimalDatabaseKeys = [idKey, primary_alias_idKey,disambiguation_noteKey]
+    queryConditions = []
     
     def __init__(self) -> None:
         super().__init__()
@@ -400,7 +485,11 @@ class Artist(Model):
     def setPrimaryAlias(self,alias_id: str):
         self.deliverableData[self.primary_alias_idKey] = alias_id
 
-class Alias(Model):
+    def createGetIdByPrimaryAlias(self) -> str:
+        query: str = "select "+self.idKey+" from " + self.table + " where "+self.primary_alias_idKey+" = " + self.deliverableData[self.primary_alias_idKey] + ";"
+        return query
+
+class Alias(Searchable):
     table = "shelf.alias"
     tableName = 'alias'
 
@@ -408,22 +497,134 @@ class Alias(Model):
     nameKey = "name" 
     artist_idKey = "artist_id" 
     vote_idKey = "vote_id"
+    activeKey = "active"
 
     primaryForeignKey = vote_idKey
 
     requiredFields = [nameKey,artist_idKey,vote_idKey] #for new artists use id 1 then change after insert
-    allDatabaseKeys = [idKey,nameKey,artist_idKey,vote_idKey]
-    allDatabaseKeysIsNumeric = [True,False,True,False]
+    allDatabaseKeys = [idKey,nameKey,artist_idKey,vote_idKey,activeKey]
+    allDatabaseKeysIsNumeric = [True,False,True,False,True]
     minimalDatabaseKeys = [idKey, nameKey]
+    queryConditions = []
+
+    searchFields = [nameKey]
+    searchJoin: ModelData = Artist()
+    searchJoinField = searchJoin.disambiguation_noteKey
+    searchForeignKey = artist_idKey
+    searchLimit = 20
+    searchSort = nameKey
+    searchActiveOnly = True
     
     def __init__(self) -> None:
         super().__init__()
+
+    def setArtistIdToUpdate(self,artistId):
+        self.deliverableData[self.artist_idKey] = artistId
+        self.toUpdate.append(self.artist_idKey)
 
     def setNewArtistHold(self):
         self.deliverableData[self.artist_idKey] = '1'
 
     def createGetIdByNameVoteQuery(self) -> str:
         query: str = "select "+self.idKey+" from " + self.table + " where "+self.nameKey+" = '" + self.deliverableData[self.nameKey] + "' AND "+self.vote_idKey+" = '" + self.deliverableData[self.vote_idKey] + "';"
+        return query
+
+class Record(Searchable):
+    table = "shelf.record"
+    tableName = 'record'
+
+    idKey = "id"
+    titleKey = "title" 
+    alias_idKey = "alias_id" 
+    coverKey = "cover" 
+    artist_idKey = "artist_id" 
+    songKey = "song" 
+    parent_record_idKey = "parent_record_id" 
+    collaborationKey = "collaboration"
+    release_yearKey = "release_year"
+
+    primaryForeignKey = alias_idKey
+
+    requiredFields = [titleKey,artist_idKey,alias_idKey]
+    allDatabaseKeys = [idKey,titleKey,alias_idKey,coverKey,artist_idKey,songKey,parent_record_idKey,collaborationKey,release_yearKey]
+    allDatabaseKeysIsNumeric = [True,False,True,False,True,True,True,True,True]
+    minimalDatabaseKeys = [idKey, titleKey, coverKey]
+    queryConditions = []
+
+    searchFields = [titleKey]
+    searchJoin: ModelData = Alias()
+    searchJoinField = searchJoin.nameKey
+    searchForeignKey = alias_idKey
+    searchLimit = 20
+    searchSort = titleKey
+    searchActiveOnly = True
+    
+    def __init__(self) -> None:
+        super().__init__()
+
+    def createCollabJoinByArtistId(self,artist_id,limit = None):
+        collabObject = Collaboration()
+        aliasObject = Alias()
+        
+        innerOnCondition = self.tableName + "." + self.alias_idKey + " = " + aliasObject.tableName + "." + aliasObject.idKey 
+        leftOnCondition = self.tableName + "." + self.idKey + " = " + collabObject.tableName + "." + collabObject.record_idKey
+
+
+        whereCondition = "(" + self.tableName + "." + self.artist_idKey + " = " + artist_id + " OR " 
+        whereCondition += collabObject.tableName + "." + collabObject.artist_idKey + " = " + artist_id + ")"
+
+        thisKeysList = self.allDatabaseKeys
+        otherKeysList = aliasObject.minimalDatabaseKeys
+        
+        self.allJoinedKeys = []
+
+        #set fields to return
+        query = "select "
+        for field in thisKeysList:
+            self.allJoinedKeys.append(field)
+            query += self.tableName + "." + field + ", "
+        for field in otherKeysList:
+            tableField = aliasObject.tableName + "." + field
+            self.allJoinedKeys.append(tableField)
+            query +=  tableField + ", "
+        
+        query = query[0:-2] + " from " + self.table + " LEFT JOIN "+ collabObject.table + " ON " + leftOnCondition
+        query += " INNER JOIN "+ aliasObject.table + " ON " + innerOnCondition + " where " + whereCondition
+        if limit != None:
+            query += " LIMIT "+str(limit)
+        query += ";"
+        return query
+    
+    def createShelvedJoinByShelfId(self,shelf_id,limit = None):
+        shelvedObject = Shelved()
+        aliasObject = Alias()
+        
+        innerOnCondition = self.tableName + "." + self.alias_idKey + " = " + aliasObject.tableName + "." + aliasObject.idKey 
+        leftOnCondition = self.tableName + "." + self.idKey + " = " + shelvedObject.tableName + "." + shelvedObject.record_idKey
+
+
+        whereCondition = shelvedObject.tableName + "." + shelvedObject.shelf_idKey + " = " + shelf_id
+
+        thisKeysList = self.allDatabaseKeys
+        otherKeysList = aliasObject.minimalDatabaseKeys
+        
+        self.allJoinedKeys = []
+
+        #set fields to return
+        query = "select "
+        for field in thisKeysList:
+            self.allJoinedKeys.append(field)
+            query += self.tableName + "." + field + ", "
+        for field in otherKeysList:
+            tableField = aliasObject.tableName + "." + field
+            self.allJoinedKeys.append(tableField)
+            query +=  tableField + ", "
+        
+        query = query[0:-2] + " from " + self.table + " LEFT JOIN "+ shelvedObject.table + " ON " + leftOnCondition
+        query += " INNER JOIN "+ aliasObject.table + " ON " + innerOnCondition + " where " + whereCondition
+        if limit != None:
+            query += " LIMIT "+str(limit)
+        query += ";"
         return query
 
 
@@ -505,7 +706,7 @@ class Ballot(Model):
         super().__init__()
     
 
-class Blog(Model):
+class Blog(Searchable):
     table = "shelf.blog"
     tableName = 'blog'
 
@@ -518,11 +719,18 @@ class Blog(Model):
     standaloneKey = "standalone" 
     privacy_idKey = "privacy_id"
     imageKey = "image"
+    descriptionKey = "description"
 
     requiredFields = [nameKey]
-    allDatabaseKeys = [idKey,nameKey,activeKey,record_idKey,user_idKey,artist_idKey,standaloneKey,privacy_idKey,imageKey]
-    allDatabaseKeysIsNumeric = [True,False,True,True,True,True,True,True,False]
+    allDatabaseKeys = [idKey,nameKey,activeKey,record_idKey,user_idKey,artist_idKey,standaloneKey,privacy_idKey,imageKey,descriptionKey]
+    allDatabaseKeysIsNumeric = [True,False,True,True,True,True,True,True,False,False]
     minimalDatabaseKeys = [idKey,nameKey]
+    queryConditions = []
+
+    searchFields = [nameKey,descriptionKey]
+    searchLimit = 20
+    searchSort = nameKey
+
     
     def __init__(self) -> None:
         super().__init__()
