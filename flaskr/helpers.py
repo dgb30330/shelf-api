@@ -16,7 +16,10 @@ def printableType(variableInQuestion):
 
 def tokenValidation(request,mysql):
     isValid = False
-    rawToken = request.headers['Authorization']
+    try:
+        rawToken = request.headers['Authorization']
+    except:
+        return isValid
     thisUser = flaskr.models.User(False)
     try:
         thisUser.populateFromToken(rawToken) #decoding token likely needs validation
@@ -49,7 +52,7 @@ def simpleInsert(request,mysql,dataModelObject: flaskr.models.Model,insertVote =
         cur.close()
         return str(True)
     except Exception as e:
-            return str(e)
+        return str(e)
     
 def simpleUpdate(id,request,mysql,dataModelObject: flaskr.models.Model):
     dataModelObject.setId(id)

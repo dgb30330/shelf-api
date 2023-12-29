@@ -11,6 +11,7 @@ class ModelData:
     tableName = 'required'
 
     idKey = 'id'
+    weightKey = 'weight'
 
     primaryForeignKey = None
 
@@ -148,11 +149,12 @@ class Model(ModelData):
     def createSelectByIdQuery(self,minimal=False,whereConditionFieldNumericboolValueTuple=None) -> str:
         query: str = "select "
         if not minimal:
-            query += "* "
+            keysList = self.allDatabaseKeys
         else:
-            for field in self.minimalDatabaseKeys:
-                query += field + ", "
-            query = query[0:-2]
+            keysList = self.minimalDatabaseKeys
+        for field in keysList:
+            query += field + ", "
+        query = query[0:-2]
         query += " from " + self.table + " where id = " + str(self.deliverableData[self.idKey])
         if whereConditionFieldNumericboolValueTuple != None: 
             query += " AND " + self.decodeWhereConditionFieldNumericboolValueTuple(whereConditionFieldNumericboolValueTuple)
@@ -162,11 +164,12 @@ class Model(ModelData):
     def createSelectByConditionQuery(self,whereConditionFieldNumericboolValueTuple=None,minimal=False) -> str:
         query: str = "select "
         if not minimal:
-            query += "* "
+            keysList = self.allDatabaseKeys
         else:
-            for field in self.minimalDatabaseKeys:
-                query += field + ", "
-            query = query[0:-2]
+            keysList = self.minimalDatabaseKeys
+        for field in keysList:
+            query += field + ", "
+        query = query[0:-2]
         query += " from " + self.table + " where " + self.decodeWhereConditionFieldNumericboolValueTuple(whereConditionFieldNumericboolValueTuple)
         query += ";"
         return query
@@ -213,6 +216,10 @@ class Model(ModelData):
     def setVoteId(self,voteId):
         self.deliverableData[self.vote_idKey] = voteId
 
+    def incrementWeightQuery(self):
+        query: str = "UPDATE " + self.table + " SET " + self.weightKey + " = " + self.weightKey + " +1  WHERE " +self.idKey+"="+str(self.deliverableData[self.idKey])
+        return query
+
 class Searchable(Model):
     searchFields = []
     searchJoin: ModelData = None
@@ -221,6 +228,7 @@ class Searchable(Model):
     searchLimit = 20
     searchSort = None
     searchActiveOnly = True
+    
 
     def createSearchQuery(self, searchString, thisMinimum = False, otherMinimum = False) -> str:
         #set conditions

@@ -10,6 +10,11 @@ from flask_cors import CORS
 import flaskr.helpers
 import flaskr.models
 
+import flaskr.pagemaker.login as l
+import flaskr.pagemaker.home as h
+import flaskr.pagemaker.record as r
+import flaskr.pagemaker.artist as a
+
 
 def create_app(test_config=None):
     # create and configure the app
@@ -24,6 +29,7 @@ def create_app(test_config=None):
     app.config['MYSQL_HOST'] = 'localhost'
     app.config['MYSQL_PORT'] = 3306
     app.config['MYSQL_DATABASE'] = 'shelf'
+    app.static_folder = 'static'
 
     cors = CORS(app, resources={r"/*": {"origins": "*"}})
 
@@ -44,7 +50,30 @@ def create_app(test_config=None):
     except OSError:
         pass
 
-    @app.route('/health')
+    @app.route('/')
+    def loginPage():
+        loginPage = l.Login()
+        return loginPage.getHTML()
+    
+    @app.route('/home/<user_id>')
+    def homePage(user_id):
+        homePage = h.Home()
+        return homePage.getHTML()
+    
+    @app.route('/record/<record_id>')
+    def recordPage(record_id):
+        recordObject = flaskr.models.Record()
+        recordPage = r.Record()
+        recordPage.incorporateObjectId(record_id)
+        return recordPage.getHTML()
+    
+    @app.route('/artist/<artist_id>')
+    def artistPage(artist_id):
+        artistPage = a.Artist()
+        artistPage.incorporateObjectId(artist_id)
+        return artistPage.getHTML()
+
+    @app.route('/api/health')
     def health():
         msg = "API Reachable - "
         cur = mysql.connection.cursor()
@@ -56,11 +85,11 @@ def create_app(test_config=None):
             msg += "ERROR no db return"
         return msg
     
-    @app.route('/test', methods = ['PUT'])
+    @app.route('/api/test', methods = ['PUT'])
     def test():
         return request.data
 
-    @app.route('/login', methods = ['PUT'])
+    @app.route('/api/login', methods = ['PUT'])
     #will need only validate pwd and change last login
     def login():
         #expected body {'displayname':'x','email':'x@x.x','password':'x','last_login':'YYYY-MM-DD HH:MM:SS.XX'} with either displayname or email null
@@ -88,7 +117,7 @@ def create_app(test_config=None):
         except Exception as e:
             return str(e)
 
-    @app.route('/user/<user_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/user/<user_id>', methods = ['GET','POST','PUT'])
     #user info includes id display name and privacy pref
     def user(user_id):
         #expected body {'displayname':'x','email':'x@x.x','image':'x','privacy_id':'0','created':'YYYY-MM-DD HH:MM:SS.XX','last_login':'YYYY-MM-DD HH:MM:SS.XX','password':'x'}
@@ -121,7 +150,7 @@ def create_app(test_config=None):
             thisUser.prepDatabaseReturn(rv)
             return thisUser.getPublicReturn()
         
-    @app.route('/search/<resource>/<string>')
+    @app.route('/api/search/<resource>/<string>')
     #return search results - list needed resources below (number to return? set by limit property in object)
     #should search strings of multiple words be searched per word?? maybe!  
     def search(resource,string):
@@ -148,12 +177,12 @@ def create_app(test_config=None):
         
 
     #Homepage (what is here! shelves/artists/blogs by size and position)
-    #using - shelves endpoint with options ('/shelves/<options>/<user_id>')
+    #using - shelves endpoint with options ('/api/shelves/<options>/<user_id>')
     #might need additional table for non shelf homepages
-    #@app.route('/home/<user_id>', methods = ['GET','POST','PUT'])
+    #@app.route('/api/home/<user_id>', methods = ['GET','POST','PUT'])
 
     
-    @app.route('/shelves/<options>/<user_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/shelves/<options>/<user_id>', methods = ['GET','POST','PUT'])
     #to get all shelves of a user and modify 'owned' table determining shelf association
     #needed options definitions - 'all' 'home'  
     def shelves(options,user_id):
@@ -171,18 +200,19 @@ def create_app(test_config=None):
                 manyOwned.setCondition((manyOwned.homeKey,True,'1'))
             if options == 'edit':
                 manyOwned.setCondition((manyOwned.editKey,True,'1'))
+            #return manyOwned.createJoinQuery(flaskr.models.Shelf(),('user_id',True,user_id))
             cur.execute(manyOwned.createJoinQuery(flaskr.models.Shelf(),('user_id',True,user_id)))
             #this may need to be a join to get lite shelf info
             rv = cur.fetchall()
             return manyOwned.manyJoinedDatabaseReturns(rv)
         
-    @app.route('/owned/<owned_id>',methods = ['PUT'])
+    @app.route('/api/owned/<owned_id>',methods = ['PUT'])
     def owned(owned_id):
         thisShelfOwned = flaskr.models.Owned()
         return flaskr.helpers.simpleUpdate(owned_id,request,mysql,thisShelfOwned)
 
  
-    @app.route('/shelf/<shelf_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/shelf/<shelf_id>', methods = ['GET','POST','PUT'])
     #to handle individual shelves in detail  
     def shelf(shelf_id):
         #expected body {'name':'x','creator_id':'x','privacy_id':'x','description':'x'}
@@ -224,7 +254,7 @@ def create_app(test_config=None):
             except Exception as e:
                 return str(e)
 
-    @app.route('/shelf/r/u/<record_id>/<user_id>')
+    @app.route('/api/shelf/r/u/<record_id>/<user_id>')
     #minimal return for preview  
     def shelf_r_u(record_id,user_id):
         shelvesToGet = flaskr.models.Shelf()
@@ -237,7 +267,7 @@ def create_app(test_config=None):
         except Exception as e:
             return str(e)    
 
-    @app.route('/shelf_lite/<shelf_id>')
+    @app.route('/api/shelf_lite/<shelf_id>')
     #minimal return for preview  
     def shelf_lite(shelf_id):
         shelfToGet = flaskr.models.Shelf()
@@ -250,7 +280,7 @@ def create_app(test_config=None):
         except Exception as e:
             return str(e)
 
-    @app.route('/record/<record_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/record/<record_id>', methods = ['GET','POST','PUT'])
     #to handle individual records in detail  
     def record(record_id):
         #expected body {'title':'xxx','artist_id':'x','alias_id':'x'}
@@ -281,12 +311,12 @@ def create_app(test_config=None):
         
 
 
-    @app.route('/record_lite/<record_id>')
+    @app.route('/api/record_lite/<record_id>')
     #minimal return for preview  
     def record_lite(record_id):
         pass
 
-    @app.route('/records/<options>/<foreign_id>')
+    @app.route('/api/records/<options>/<foreign_id>')
     #to handle individual records in detail  
     def records(options,foreign_id):
         manyRecords = flaskr.models.Record()
@@ -305,22 +335,37 @@ def create_app(test_config=None):
         else:
             return str(False)
         
-    @app.route('/shelved/<shelved_id>',methods = ['POST','PUT'])
+    @app.route('/api/shelved/<shelved_id>',methods = ['POST','PUT'])
     def shelved(shelved_id):
         #expected body {'shelf_id':'x','record_id':'x','shelved':'YYYY-MM-DD HH:MM:SS.XX'}
+        thisShelvedRecord = flaskr.models.Shelved()
+        thisRecord = flaskr.models.Record()
+        thisArtist = flaskr.models.Artist()
+        requestData = thisRecord.dictFromRaw(request.data)
+        thisRecord.setId(requestData['record_id'])
+        try:
+            cur = mysql.connection.cursor()
+            cur.execute(thisRecord.createSelectByIdQuery())
+            rv = cur.fetchall()
+            thisRecord.prepDatabaseReturn(rv)
+            thisArtist.setId(thisRecord.deliverableData['artist_id'])
+            cur.execute(thisRecord.incrementWeightQuery())
+            cur.execute(thisArtist.incrementWeightQuery())
+            mysql.connection.commit()
+            cur.close()
+        except Exception as e:
+            return str(e)
         if request.method == 'POST':
             #TODO check duplication and throw errow
-            newShelvedRecord = flaskr.models.Shelved()
-            return flaskr.helpers.simpleInsert(request,mysql,newShelvedRecord)
+            return flaskr.helpers.simpleInsert(request,mysql,thisShelvedRecord)
         elif request.method == 'PUT':
-            thisShelvedRecord = flaskr.models.Shelved()
             return flaskr.helpers.simpleUpdate(shelved_id,request,mysql,thisShelvedRecord)
         else:
             pass
 
         
 
-    @app.route('/link/<record_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/link/<record_id>', methods = ['GET','POST','PUT'])
     #to handle streamin links by record  
     def link(record_id):
         #expected body {'url':'xxx','record_id':'x','platform_id':'x'}
@@ -331,7 +376,7 @@ def create_app(test_config=None):
         else:
             pass
 
-    @app.route('/resource/<record_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/resource/<record_id>', methods = ['GET','POST','PUT'])
     #to handle resource links by record  
     def resource(record_id):
         #expected body {'url':'xxx','record_id':'x','variety_code':'x'}
@@ -342,7 +387,7 @@ def create_app(test_config=None):
         else:
             pass
 
-    @app.route('/artist/<artist_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/artist/<artist_id>', methods = ['GET','POST','PUT'])
     #to handle individual artists in detail  
     def artist(artist_id):
         if request.method == 'POST':
@@ -386,12 +431,12 @@ def create_app(test_config=None):
             rv = cur.fetchall()
             return thisArtist.prepJoinedDatabaseReturn(rv)
 
-    @app.route('/artist_lite/<artist_id>')
+    @app.route('/api/artist_lite/<artist_id>')
     #minimal return for preview  
     def artist_lite(artist_id):
         pass
 
-    @app.route('/alias/<alias_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/alias/<alias_id>', methods = ['GET','POST','PUT'])
     #to get all blogs of a user and modify 'follow' table determining shelf association
     #needed options definitions - 'all' 'home'  
     def alias(alias_id):
@@ -411,12 +456,12 @@ def create_app(test_config=None):
             except Exception as e:
                 return str(e)
 
-    @app.route('/blogs/<options>/<user_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/blogs/<options>/<user_id>', methods = ['GET','POST','PUT'])
     #to get all blogs of a user and modify 'follow' table determining shelf association
     #needed options definitions - 'all' 'home'  
     def blogs(options,user_id):
         #expected body {'blog_id':'x','user_id':'x'}
-        if request.method == 'POST':
+        if request.method == 'POST': #WHY!? POST api/follow should handle
             newBlogFollow = flaskr.models.Follow()
             return flaskr.helpers.simpleInsert(request,mysql,newBlogFollow)
         elif request.method == 'PUT':
@@ -433,12 +478,26 @@ def create_app(test_config=None):
             #return str(rv)
             return manyFollows.manyJoinedDatabaseReturns(rv)
         
-    @app.route('/follow/<follow_id>',methods = ['PUT'])
+    @app.route('/api/follow/<follow_id>',methods = ['POST','PUT'])
     def follow(follow_id):
-        thisBlogFollow = flaskr.models.Follow()
-        return flaskr.helpers.simpleUpdate(follow_id,request,mysql,thisBlogFollow)
+        #expected body {'blog_id':'x','user_id':'x'}
+        if request.method == 'POST':
+            thisBlog = flaskr.models.Blog()
+            requestData = thisBlog.dictFromRaw(request.data)
+            thisBlog.setId(requestData['blog_id'])
+            try:
+                cur = mysql.connection.cursor()
+                cur.execute(thisBlog.incrementWeightQuery())
+                mysql.connection.commit()
+                cur.close()
+            except Exception as e:
+                return str(e)
+            return flaskr.helpers.simpleInsert(request,mysql,flaskr.models.Follow())
+        elif request.method == 'PUT':
+            thisBlogFollow = flaskr.models.Follow()
+            return flaskr.helpers.simpleUpdate(follow_id,request,mysql,thisBlogFollow,True)
 
-    @app.route('/blog/<options>/<blog_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/blog/<options>/<blog_id>', methods = ['GET','POST','PUT'])
     #to handle individual blogs in detail  
     def blog(options,blog_id):
         #expected body {'name':'xxx'}
@@ -455,7 +514,7 @@ def create_app(test_config=None):
             rv = cur.fetchall()
             return thisBlog.prepDatabaseReturn(rv)
 
-    @app.route('/blog_lite/<blog_id>')
+    @app.route('/api/blog_lite/<blog_id>')
     #minimal return for preview  
     def blog_lite(blog_id):
         thisBlog = flaskr.models.Blog()
@@ -465,7 +524,7 @@ def create_app(test_config=None):
         rv = cur.fetchall()
         return thisBlog.prepDatabaseReturn(rv,minimal=True)
 
-    @app.route('/posts/<options>/<blog_id>')
+    @app.route('/api/posts/<options>/<blog_id>')
     #minimal return for preview  
     def posts(options,blog_id):
         manyPosts = flaskr.models.Post()
@@ -474,7 +533,7 @@ def create_app(test_config=None):
         rv = cur.fetchall()
         return manyPosts.manyJoinedDatabaseReturns(rv)
 
-    @app.route('/post/<post_id>', methods = ['GET','POST','PUT'])
+    @app.route('/api/post/<post_id>', methods = ['GET','POST','PUT'])
     #to handle individual blogs in detail  
     def post(post_id):
         #expected body {'user_id':'x','blog_id':'x','text':'xxx','posted':'YYYY-MM-DD HH:MM:SS.XX','vote_id':'xxx'}
